@@ -21,7 +21,18 @@ export default function App() {
         body: formData,
       });
 
-      const data = await res.json();
+      const text = await res.text();
+
+      if (!text) {
+        throw new Error(`Server returned an empty response (HTTP ${res.status}). Check the backend terminal for errors.`);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Backend returned non-JSON response (HTTP ${res.status}): ${text.slice(0, 200)}`);
+      }
 
       if (!res.ok) {
         throw new Error(data.detail || `Server error ${res.status}`);
