@@ -1,4 +1,4 @@
-# PII Redaction Tool
+# PII Redaction Tool (Personally Identifiable Information)
 
 A document anonymisation service that automatically detects and masks personally identifiable information using a purpose-built token classification model. Built with FastAPI and React.
 
