@@ -1,4 +1,3 @@
-import os
 import shutil
 from pathlib import Path
 
@@ -20,9 +19,9 @@ app = FastAPI(title="PII Redaction Tool")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -44,7 +43,7 @@ async def redact(file: UploadFile = File(...)):
             detail=f"Unsupported file type '.{suffix}'. Accepted: {', '.join(SUPPORTED_TYPES)}.",
         )
 
-    input_path = INPUTS_DIR / file.filename
+    input_path = INPUTS_DIR / Path(file.filename).name
     with open(input_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
@@ -71,7 +70,8 @@ async def redact(file: UploadFile = File(...)):
 
 @app.get("/download/{filename}")
 def download(filename: str):
-    file_path = OUTPUTS_DIR / filename
+    safe_name = Path(filename).name
+    file_path = OUTPUTS_DIR / safe_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found.")
-    return FileResponse(path=str(file_path), filename=filename, media_type="text/plain")
+    return FileResponse(path=str(file_path), filename=safe_name, media_type="text/plain")

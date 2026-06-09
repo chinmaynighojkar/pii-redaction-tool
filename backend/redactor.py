@@ -37,13 +37,6 @@ def redact_text(text: str, entities: list) -> tuple:
         key = (label, original)
         if key not in seen:
             seen.add(key)
-            summary.append(
-                {
-                    "label": label,
-                    "original_value": original,
-                    "start": start,
-                    "end": end,
-                }
-            )
+            summary.append({"label": label, "start": start, "end": end})
 
     return redacted, summary
