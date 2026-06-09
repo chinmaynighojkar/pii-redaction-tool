@@ -52,6 +52,8 @@ export default function RedactedViewer({ result, onDownload, onReset }) {
         <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "#6b7280", marginBottom: "0.6rem" }}>
           REDACTED OUTPUT
         </div>
+        {/* Safe: highlightRedactions() HTML-escapes all text before substituting
+            backend-generated [LABEL REDACTED] tokens with <mark> elements. */}
         <div
           className="redacted-text"
           dangerouslySetInnerHTML={{ __html: highlighted }}
