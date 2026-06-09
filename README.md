@@ -173,10 +173,44 @@ Implementing the reverse sort replacement logic was a small detail that required
 
 ---
 
+## Security Hardening
+
+After the initial build, a systematic review identified vulnerabilities and reliability gaps across the backend and frontend. The following changes were made.
+
+### Critical fixes
+
+**Path traversal on upload and download** — Both the `/redact` endpoint and the `/download/{filename}` endpoint accepted filenames directly from user input without stripping directory components. A crafted filename like `../../etc/passwd` could read or overwrite files outside the intended upload and output directories. Both paths now use `Path(filename).name` to sanitise the name before constructing the final file path.
+
+**CORS wildcard** — The middleware was configured with `allow_origins=["*"]`, which allows any origin to make cross-site requests to the API. The allowed origin is now restricted to `http://localhost:5173`, `allow_credentials` is set to `False`, and only `GET` and `POST` methods are permitted.
+
+**PII values in API response** — The entity summary returned by `/redact` included an `original_value` field containing the exact text that was detected and masked. This meant the API response itself contained the PII the tool was supposed to remove, which defeats the purpose for any workflow that logs or stores API responses. The summary now returns only the entity type and character span positions.
+
+**No MIME type validation** — The upload endpoint accepted any `Content-Type`. A file with a valid extension but a mismatched or malicious payload would be passed to the extraction pipeline. The endpoint now validates both the file extension and the `Content-Type` header against an explicit allowlist before any processing begins.
+
+### Important fixes
+
+**No file size limit** — There was no upper bound on upload size, making it trivial to exhaust server memory with a large file. Uploads are now capped at 10 MB. The backend enforces this by reading up to 10 MB plus one byte and rejecting anything that exceeds the limit before writing to disk.
+
+**Uploaded file not cleaned up** — Input files written to `inputs/` were not deleted after the text extraction step. The file is now removed immediately after extraction inside a `finally` block, so cleanup happens even when processing fails partway through.
+
+**Blocking inference on the async thread** — `detect_pii()` calls the transformer pipeline synchronously. Running it directly inside an `async` route handler stalls the event loop for the full duration of model inference, preventing the server from handling any other request in the meantime. The call is now offloaded to a thread pool worker with `asyncio.to_thread()`.
+
+**`print()` in the model loader** — The model loading fallback used `print()` to surface failures. This bypasses any structured logging or log aggregation. The statement is now a `logging.warning()` call through a named module logger.
+
+### Nits
+
+**Client-side size check** — `UploadZone.jsx` now validates file size immediately on file selection and shows a clear error before the upload request is sent, rather than waiting for the backend to return a 413.
+
+**Pinned dependency ranges** — `requirements.txt` now specifies compatible upper-bound version ranges for all dependencies rather than leaving them unpinned, which prevents silent breakage when a major version of a dependency ships.
+
+**`dangerouslySetInnerHTML` comment** — `RedactedViewer.jsx` now includes an inline comment explaining that the usage is safe because `highlightRedactions()` HTML-escapes all document text before substituting backend-generated tokens with `<mark>` elements.
+
+**Validation error message** — The `else` branch in `preprocessor.py`'s `extract_text()` now raises a consistently formatted error string rather than a dead code path with a mismatched message.
+
+---
+
 ## Contact
 
-Built by Chinmay Nighojkar | Data and Analytics Professional based in Ireland
-
-Open to data analytics, compliance analytics, and BI engineering roles in Cork and Dublin.
+Built by Chinmay Nighojkar
 
 [LinkedIn](https://www.linkedin.com/in/chinmaynighojkar/) | [GitHub](https://github.com/chinmaynighojkar/)
