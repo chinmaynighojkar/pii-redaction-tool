@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 
 const ACCEPTED = [".pdf", ".csv", ".txt"];
 const ACCEPTED_MIME = ["application/pdf", "text/csv", "text/plain"];
+const MAX_SIZE = 10 * 1024 * 1024; // 10 MB — matches backend limit
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -20,9 +21,16 @@ export default function UploadZone({ onAnalyse, loading, error }) {
   const inputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [sizeError, setSizeError] = useState(null);
 
   function handleFile(f) {
     if (!f) return;
+    if (f.size > MAX_SIZE) {
+      setFile(null);
+      setSizeError(`File too large (${formatBytes(f.size)}). Maximum size is 10 MB.`);
+      return;
+    }
+    setSizeError(null);
     setFile(f);
   }
 
@@ -83,7 +91,7 @@ export default function UploadZone({ onAnalyse, loading, error }) {
           </div>
         )}
 
-        {error && <div className="error-box">⚠ {error}</div>}
+        {(sizeError || error) && <div className="error-box">⚠ {sizeError || error}</div>}
 
         <button
           className="btn btn-primary"

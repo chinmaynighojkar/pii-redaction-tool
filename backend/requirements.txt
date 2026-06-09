@@ -1,8 +1,8 @@
-fastapi
-uvicorn
-transformers
-torch
-pdfplumber
-pandas
-python-multipart
-python-dotenv
+fastapi>=0.136,<1
+uvicorn>=0.47,<1
+transformers>=5.8,<6
+torch>=2.11,<3
+pdfplumber>=0.11,<1
+pandas>=3.0,<4
+python-multipart>=0.0.27,<1
+python-dotenv>=1,<2

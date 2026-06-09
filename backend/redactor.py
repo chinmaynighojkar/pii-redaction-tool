@@ -1,4 +1,8 @@
+import logging
+
 from transformers import pipeline
+
+logger = logging.getLogger(__name__)
 
 try:
     _nlp = pipeline(
@@ -10,7 +14,7 @@ try:
 except Exception as _e:
     _nlp = None
     MODEL_LOADED = False
-    print(f"[redactor] WARNING: model failed to load — {_e}")
+    logger.warning("PII model failed to load: %s", _e)
 
 
 def detect_pii(text: str) -> list:
