@@ -11,10 +11,20 @@ logger = logging.getLogger(__name__)
 # here instead. Raising this needs chunked inference, not a bigger number.
 MAX_TEXT_CHARS = 4_000
 
+MODEL_NAME = "openai/privacy-filter"
+
+# Pinned to a commit rather than tracking main. The output of this model is a
+# security control, so it should not change underneath a deployment because
+# someone pushed to the repository. This is the revision every test here was
+# written against. Moving it means re-running the suite and looking at the
+# output, not just bumping the string.
+MODEL_REVISION = "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+
 try:
     _nlp = pipeline(
         "token-classification",
-        model="openai/privacy-filter",
+        model=MODEL_NAME,
+        revision=MODEL_REVISION,
         aggregation_strategy="simple",
     )
     MODEL_LOADED = True

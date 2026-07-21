@@ -74,6 +74,8 @@ I read that as a guarantee of one span per entity. It is not, and I did not find
 Contact[private_person REDACTED][private_person REDACTED] at[private_email REDACTED]...
 ```
 
+The model is pinned to a commit rather than tracking `main`. Its output is a security control here, so it should not change because someone pushed to the HuggingFace repository, and the pinned revision is the one every test in this project was written against. Moving it means re-running the suite and reading the output, not just editing the string.
+
 The model works on tokens, so a name it has not seen before gets broken into pieces. "Fhaolain" came back as "Fhaol" and "ain" in two spans that touch each other, and each of those spans had quietly taken the space in front of it as well, which is why the text runs straight into the placeholder. The redaction engine below cleans up both problems.
 
 ### The Redaction Engine
@@ -313,8 +315,6 @@ These are real and none of them are fixed. I would rather write them down than l
 **`/download/{filename}` has no authentication and predictable names** — The route serves any file in `outputs/` to anyone who can reach it, and output names are derived from the uploaded filename as `redacted_{stem}.txt`. Two people uploading `report.pdf` overwrite each other's output, and either can retrieve the other's by guessing a common filename. Path traversal is handled, but authorisation is not, because there is no concept of a user. Fixing this properly means per-request identifiers rather than name-derived paths, plus ownership checks.
 
 **No authentication or rate limiting anywhere** — Every endpoint is open. Model inference is expensive, so an unauthenticated caller can tie up the server with repeated requests. The GraphQL text argument is length capped and uploads are size capped, which bounds a single request but not the number of them.
-
-**The model revision is not pinned** — `pipeline()` is called with a model name and no `revision` argument, so it resolves to whatever the HuggingFace repository currently points at. For a tool whose output is a security control, the detector changing underneath a deployment is a genuine supply chain concern. It should be pinned to a commit hash.
 
 **Test coverage is narrow** — There are tests now, covering the redaction logic and the security properties listed above, but nothing covers file parsing, the React components, or how the model behaves on documents it has not seen. There is also no CI, so the suite only runs when someone remembers to run it.
 
