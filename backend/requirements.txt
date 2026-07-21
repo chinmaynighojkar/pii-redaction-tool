@@ -5,4 +5,5 @@ torch>=2.11,<3
 pdfplumber>=0.11,<1
 pandas>=3.0,<4
 python-multipart>=0.0.27,<1
+strawberry-graphql[fastapi]>=0.322,<1
 python-dotenv>=1,<2

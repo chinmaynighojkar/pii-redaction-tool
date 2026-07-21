@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env
+.env.*
 backend/inputs/
 backend/outputs/
 node_modules/
@@ -9,3 +10,14 @@ dist/
 *.egg-info/
 venv/
 .venv/
+.pytest_cache/
+.ruff_cache/
+.idea/
+.vscode/
+*.log
+
+# Documents dropped in the repo root during development. This tool is fed real
+# PII while testing, so never let a stray upload or export be committed.
+/*.pdf
+/*.csv
+/*.txt

@@ -140,6 +140,66 @@ The React app runs at `http://localhost:5173` and proxies all API calls to the F
 | POST | `/redact` | Upload a file, returns redacted text and entity summary |
 | GET | `/health` | Confirms the API is running and the model is loaded |
 | GET | `/download/{filename}` | Downloads a redacted output file by name |
+| POST | `/graphql` | GraphQL endpoint, see below |
+
+### GraphQL
+
+The REST route above is file-oriented: you upload a PDF, CSV, or TXT and get a
+redacted file back. The GraphQL endpoint covers the other case, redacting a
+string in place, and calls the same `detect_pii` and `redact_text` functions in
+`redactor.py` rather than reimplementing anything.
+
+```graphql
+mutation {
+  redactText(text: "Contact Aoife at aoife@example.ie") {
+    redactedText
+    entities { type start end redactedText }
+  }
+}
+```
+
+Redaction is a mutation even though no server state changes. The argument
+carries un-redacted PII, and GraphQL tooling will cache, replay, and put queries
+in URLs, but never does any of that to a mutation. For the same reason
+`allow_queries_via_get` is off, so nothing in this schema can reach a server log
+by way of a query string.
+
+Set `PII_DEBUG=1` to serve the GraphiQL playground at `/graphql` and enable
+introspection. Both are off by default, so a deployed instance does not hand out
+its own schema map.
+
+`Entity.redactedText` is the placeholder that replaced the span, never the value
+that was removed, for the reason described under Security Hardening below.
+
+### Why GraphQL Here, Honestly
+
+GraphQL earns its keep when many clients need different shapes of related data:
+it lets a client fetch a whole tree in one round trip instead of chaining calls,
+ask for only the fields it will render, and evolve behind one endpoint instead of
+`/v1` and `/v2`. The schema is typed and introspectable, so tooling can generate
+client types and GraphiQL can autocomplete against a live server.
+
+For this API most of that does not apply. There is one resource and one
+operation. There is no tree to fetch in a single round trip and no N+1 problem to
+solve, and REST is the better fit for the file upload path that most users
+actually use. The overhead is real too: every response is HTTP 200 with errors in
+the body, and HTTP caching no longer does anything for you.
+
+What the layer does buy, on its own terms:
+
+- A contract the server enforces. `redactText(text: String!): RedactionResult!`
+  is validated before any resolver runs, so a client asking for a field that does
+  not exist fails immediately instead of quietly reading `null` in production.
+- Field selection. A caller that only needs `redactedText` does not receive the
+  entity list. For a tool that handles sensitive documents, not sending data
+  nobody asked for is worth something.
+- Documentation that cannot drift, because GraphiQL generates it from the running
+  schema rather than from a file someone has to remember to update.
+
+So: REST stays the primary interface, and GraphQL is a second door onto the same
+redaction core. Both call `detect_pii` and `redact_text`, which is the part worth
+insisting on. Two protocols over one implementation is fine. Two implementations
+would not be.
 
 ---
 

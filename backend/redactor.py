@@ -23,20 +23,56 @@ def detect_pii(text: str) -> list:
     return _nlp(text)
 
 
+def redaction_placeholder(label: str) -> str:
+    return f"[{label} REDACTED]"
+
+
+def merge_adjacent(text: str, entities: list) -> list:
+    """Join the detector's fragments back into whole entities.
+
+    The pipeline splits one name or address across touching spans, and those
+    spans tend to swallow the space in front of them, so redacting each one
+    separately produced a placeholder per fragment. Join spans that touch and
+    share a label, then trim the surrounding whitespace back off.
+    """
+    merged = []
+    for ent in sorted(entities, key=lambda e: e["start"]):
+        label = ent["entity_group"]
+        start = ent["start"]
+        end = ent["end"]
+
+        if merged and merged[-1]["label"] == label and merged[-1]["end"] == start:
+            merged[-1]["end"] = end
+            continue
+
+        merged.append({"label": label, "start": start, "end": end})
+
+    trimmed = []
+    for span in merged:
+        original = text[span["start"] : span["end"]]
+        if not original.strip():
+            continue
+        span["start"] += len(original) - len(original.lstrip())
+        span["end"] -= len(original) - len(original.rstrip())
+        trimmed.append(span)
+
+    return trimmed
+
+
 def redact_text(text: str, entities: list) -> tuple:
-    sorted_entities = sorted(entities, key=lambda e: e["start"], reverse=True)
+    spans = merge_adjacent(text, entities)
 
     redacted = text
     seen = set()
     summary = []
 
-    for ent in sorted_entities:
-        label = ent["entity_group"]
-        start = ent["start"]
-        end = ent["end"]
+    for span in reversed(spans):
+        label = span["label"]
+        start = span["start"]
+        end = span["end"]
         original = text[start:end]
 
-        redacted = redacted[:start] + f"[{label} REDACTED]" + redacted[end:]
+        redacted = redacted[:start] + redaction_placeholder(label) + redacted[end:]
 
         key = (label, original)
         if key not in seen:

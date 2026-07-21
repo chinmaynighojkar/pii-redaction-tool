@@ -5,8 +5,9 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from graphql_api import graphql_router
 from preprocessor import extract_text
-from redactor import MODEL_LOADED, detect_pii, redact_text
+from redactor import MODEL_LOADED, detect_pii, merge_adjacent, redact_text
 
 INPUTS_DIR = Path(__file__).parent / "inputs"
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
@@ -32,6 +33,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+app.include_router(graphql_router, prefix="/graphql")
 
 
 @app.get("/health")
@@ -81,7 +85,9 @@ async def redact(file: UploadFile = File(...)):
     return {
         "redacted_text": redacted,
         "entity_summary": summary,
-        "entity_count": len(entities),
+        # Whole entities, not the detector's sub-word fragments, so the count
+        # agrees with the number of placeholders in the redacted text.
+        "entity_count": len(merge_adjacent(text, entities)),
         "file_name": output_filename,
     }
 
