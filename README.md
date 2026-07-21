@@ -36,7 +36,7 @@ Upload any document and the tool will:
 
 - Extract text from PDFs, CSVs, or plain text files
 - Run it through `openai/privacy-filter`, detecting PII at the character span level
-- Replace each detected entity with a labelled placeholder such as `[NAME REDACTED]` or `[EMAIL REDACTED]`
+- Replace each detected entity with a labelled placeholder such as `[private_person REDACTED]` or `[private_email REDACTED]`
 - Display the redacted output with all masked spans highlighted in amber
 - Show a summary panel listing every entity type found and how many instances were detected
 - Let you download the clean redacted file immediately
@@ -51,9 +51,14 @@ Input:
   Her office is at 14 Fitzgerald Road, Cork, T12 XY34.
 
 Output:
-  Please contact [NAME REDACTED] at [EMAIL REDACTED] or call her on [PHONE REDACTED].
-  Her office is at [ADDRESS REDACTED], Cork, [EIRCODE REDACTED].
+  Please contact [private_person REDACTED] at [private_email REDACTED] or call her on
+  [private_phone REDACTED]. Her office is at [private_address REDACTED].
 ```
+
+The placeholder labels come from the model's own entity classes rather than a
+mapping of my own, so they read as `private_person` instead of `NAME`. Note that
+the town and Eircode are absorbed into the single `private_address` span, which
+is the model's judgement rather than four separate detections.
 
 ---
 
@@ -61,13 +66,30 @@ Output:
 
 ### The Model
 
-`openai/privacy-filter` uses the HuggingFace `transformers` pipeline with `aggregation_strategy="simple"`, which merges consecutive tokens belonging to the same entity into a single span. A full name like "Aoife Murphy" comes back as one entity with a start index, end index, and label rather than two separate word level tokens. This makes the output clean and straightforward to process downstream.
+`openai/privacy-filter` uses the HuggingFace `transformers` pipeline with `aggregation_strategy="simple"`, which groups consecutive tokens sharing a predicted label into a span with a start index, end index, and label.
+
+It is worth being precise about what that does and does not give you, because I originally assumed more than it delivers. Aggregation does not guarantee one span per real-world entity. This is a token classification model, so a name outside its vocabulary is split across sub-word pieces, and those pieces come back as separate touching spans. Redacting a real sentence produced this:
+
+```
+Contact[private_person REDACTED][private_person REDACTED] at[private_email REDACTED]...
+```
+
+"Fhaolain" had been split into "Fhaol" and "ain" across two adjacent spans, and each span also included the whitespace in front of it, which is why the space before the placeholder disappeared. The fix is in the redaction engine below.
 
 ### The Redaction Engine
 
-Once the model returns a list of entity spans, the redaction engine sorts them by start index in reverse order. This is a deliberate design decision. Replacing spans from left to right shifts the character offsets of everything that follows, causing subsequent replacements to land in the wrong position. Sorting in reverse means each replacement operates on indices that have not yet been shifted, keeping the output accurate regardless of how many entities are detected in a single document.
+The engine does two things before it touches the text.
 
-Each span is replaced with `[LABEL REDACTED]` where the label reflects the entity type. The original entity values and their positions are preserved in a summary object returned alongside the redacted text, so the user can see exactly what was found and masked rather than receiving a silently altered document.
+**Merging fragments.** `merge_adjacent()` walks the spans in order and joins any two that share a label and touch exactly, so the sub-word pieces of one name become one span again. It then trims the whitespace those spans had swallowed at their edges, which restores the space before each placeholder. Without this step you get one placeholder per fragment rather than per entity.
+
+```python
+if merged and merged[-1]["label"] == label and merged[-1]["end"] == start:
+    merged[-1]["end"] = end
+```
+
+**Replacing from the right.** The merged spans are then applied in reverse order of start index. Replacing from left to right shifts the character offsets of everything after each substitution, so later replacements land in the wrong position. Working backwards means every replacement operates on indices that have not yet moved, regardless of how many entities a document contains.
+
+Each span is replaced with `[LABEL REDACTED]` where the label is the model's entity class. A summary object returned alongside the redacted text lists the type and character span of everything that was masked, so a reviewer can audit what was caught rather than receiving a silently altered document. The summary deliberately does not include the original values, for the reason given under Security Hardening.
 
 ### The Stack
 
@@ -86,10 +108,11 @@ Each span is replaced with `[LABEL REDACTED]` where the label reflects the entit
 ```
 pii-redaction-tool/
 ├── backend/
-│   ├── inputs/              # Uploaded files land here
-│   ├── outputs/             # Redacted outputs saved here
-│   ├── main.py              # FastAPI app and endpoints
-│   ├── redactor.py          # Model loading and redaction logic
+│   ├── inputs/              # Uploads land here, deleted after extraction
+│   ├── outputs/             # Redacted outputs saved here, not cleaned up
+│   ├── main.py              # FastAPI app and REST endpoints
+│   ├── graphql_api.py       # GraphQL schema and router
+│   ├── redactor.py          # Model loading, span merging, redaction
 │   ├── preprocessor.py      # File parsing by type
 │   └── requirements.txt
 ├── frontend/
@@ -231,6 +254,8 @@ The most useful thing this project clarified for me was how the precision versus
 
 Implementing the reverse sort replacement logic was a small detail that required thinking carefully before writing any code. It is the kind of thing that works perfectly in testing on short strings and silently breaks on longer documents with many entities if you get the ordering wrong.
 
+The bug I actually shipped was the one I never reasoned about. The reverse sort I thought hard about was right from the start. The fragmented spans I assumed the model was handling for me were not, and that only surfaced months later when I read a full redacted sentence instead of checking that a response came back at all. Careful reasoning protects you from the failure you are already looking at. Reading the real output is what catches the rest.
+
 ---
 
 ## Security Hardening
@@ -266,6 +291,20 @@ After the initial build, a systematic review identified vulnerabilities and reli
 **`dangerouslySetInnerHTML` comment** — `RedactedViewer.jsx` now includes an inline comment explaining that the usage is safe because `highlightRedactions()` HTML-escapes all document text before substituting backend-generated tokens with `<mark>` elements.
 
 **Validation error message** — The `else` branch in `preprocessor.py`'s `extract_text()` now raises a consistently formatted error string rather than a dead code path with a mismatched message.
+
+### Known gaps
+
+These are real and not yet fixed. They are listed because a redaction tool that is quiet about its weaknesses is worse than one that is not.
+
+**Redacted outputs are never deleted** — Uploads are removed from `inputs/` immediately after text extraction, but the redacted file written to `outputs/` stays on disk indefinitely. There is no retention policy and no cleanup job, so a long-running instance accumulates every document it has ever processed. Redacted output is lower risk than the original, but it is not zero risk, since spans the model missed remain in plain text.
+
+**`/download/{filename}` has no authentication and predictable names** — The route serves any file in `outputs/` to anyone who can reach it, and output names are derived from the uploaded filename as `redacted_{stem}.txt`. Two people uploading `report.pdf` overwrite each other's output, and either can retrieve the other's by guessing a common filename. Path traversal is handled, but authorisation is not, because there is no concept of a user. Fixing this properly means per-request identifiers rather than name-derived paths, plus ownership checks.
+
+**No authentication or rate limiting anywhere** — Every endpoint is open. Model inference is expensive, so an unauthenticated caller can tie up the server with repeated requests. The GraphQL text argument is length capped and uploads are size capped, which bounds a single request but not the number of them.
+
+**The model revision is not pinned** — `pipeline()` is called with a model name and no `revision` argument, so it resolves to whatever the HuggingFace repository currently points at. For a tool whose output is a security control, the detector changing underneath a deployment is a genuine supply chain concern. It should be pinned to a commit hash.
+
+**No automated tests** — Every fix above was verified by hand. Nothing currently prevents a future change from silently reintroducing one of them, and that is the most useful next piece of work on this project.
 
 ---
 
