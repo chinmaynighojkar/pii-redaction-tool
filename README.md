@@ -114,7 +114,9 @@ pii-redaction-tool/
 │   ├── graphql_api.py       # GraphQL schema and router
 │   ├── redactor.py          # Model loading, span merging, redaction
 │   ├── preprocessor.py      # File parsing by type
-│   └── requirements.txt
+│   ├── tests/               # Redaction logic, API security, frontend contract
+│   ├── requirements.txt
+│   └── requirements-dev.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
@@ -153,6 +155,18 @@ npm run dev
 ```
 
 The React app runs at `http://localhost:5173` and proxies all API calls to the FastAPI backend at port 8000.
+
+### Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+The redaction tests work on plain dictionaries, so they need neither a server nor any inference and finish in about a second. The API tests need a backend already listening, since loading a 1B parameter model per test run is not worth it, and they skip with a message if there is nothing on port 8000. Point them somewhere else with `PII_TEST_URL`.
+
+Most of these exist because something was actually broken. One example: the placeholder highlighting in the UI never worked, because the regex looking for `[LABEL REDACTED]` only matched uppercase letters while the model emits lowercase labels like `private_person`. A Python test suite would never have caught that, so one test reads the regex out of the JSX and checks it against the labels the model really produces.
 
 ---
 
@@ -302,7 +316,7 @@ These are real and none of them are fixed. I would rather write them down than l
 
 **The model revision is not pinned** — `pipeline()` is called with a model name and no `revision` argument, so it resolves to whatever the HuggingFace repository currently points at. For a tool whose output is a security control, the detector changing underneath a deployment is a genuine supply chain concern. It should be pinned to a commit hash.
 
-**No automated tests** — Every fix above was verified by hand. Nothing currently prevents a future change from silently reintroducing one of them, and that is the most useful next piece of work on this project.
+**Test coverage is narrow** — There are tests now, covering the redaction logic and the security properties listed above, but nothing covers file parsing, the React components, or how the model behaves on documents it has not seen. There is also no CI, so the suite only runs when someone remembers to run it.
 
 **Documents have to be small, and that is the real limitation** — Inference cost climbs much faster than input length. Measured on this model on CPU, 4,000 characters redacts in about twelve seconds, 10,000 characters did not finish in ten minutes, and 168,000 characters asked the allocator for 12.8 GB and raised a `RuntimeError`. The 10 MB upload limit does nothing to bound any of that, so a 200 KB text file was enough to take the process down. Both entry points now cap extracted text at `MAX_TEXT_CHARS` and return 413 rather than dying, but a cap is containment, not a fix. Handling a document of realistic length means chunking the text and running inference over windows, which is the next real piece of engineering here.
 
