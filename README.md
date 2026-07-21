@@ -74,9 +74,9 @@ I read that as a guarantee of one span per entity. It is not, and I did not find
 Contact[private_person REDACTED][private_person REDACTED] at[private_email REDACTED]...
 ```
 
-The model is pinned to a commit rather than tracking `main`. Its output is a security control here, so it should not change because someone pushed to the HuggingFace repository, and the pinned revision is the one every test in this project was written against. Moving it means re-running the suite and reading the output, not just editing the string.
-
 The model works on tokens, so a name it has not seen before gets broken into pieces. "Fhaolain" came back as "Fhaol" and "ain" in two spans that touch each other, and each of those spans had quietly taken the space in front of it as well, which is why the text runs straight into the placeholder. The redaction engine below cleans up both problems.
+
+The model is pinned to a commit rather than tracking `main`. Its output is a security control here, so it should not change because someone pushed to the HuggingFace repository, and the pinned revision is the one every test in this project was written against. Moving it means re-running the suite and reading the output, not just editing the string.
 
 ### The Redaction Engine
 
@@ -278,47 +278,47 @@ After the initial build, a systematic review identified vulnerabilities and reli
 
 ### Critical fixes
 
-**Path traversal on upload and download** — Both the `/redact` endpoint and the `/download/{filename}` endpoint accepted filenames directly from user input without stripping directory components. A crafted filename like `../../etc/passwd` could read or overwrite files outside the intended upload and output directories. Both paths now use `Path(filename).name` to sanitise the name before constructing the final file path.
+**Path traversal on upload and download**. Both the `/redact` endpoint and the `/download/{filename}` endpoint accepted filenames directly from user input without stripping directory components. A crafted filename like `../../etc/passwd` could read or overwrite files outside the intended upload and output directories. Both paths now use `Path(filename).name` to sanitise the name before constructing the final file path.
 
-**CORS wildcard** — The middleware was configured with `allow_origins=["*"]`, which allows any origin to make cross-site requests to the API. The allowed origin is now restricted to `http://localhost:5173`, `allow_credentials` is set to `False`, and only `GET` and `POST` methods are permitted.
+**CORS wildcard**. The middleware was configured with `allow_origins=["*"]`, which allows any origin to make cross-site requests to the API. The allowed origin is now restricted to `http://localhost:5173`, `allow_credentials` is set to `False`, and only `GET` and `POST` methods are permitted.
 
-**PII values in API response** — The entity summary returned by `/redact` included an `original_value` field containing the exact text that was detected and masked. This meant the API response itself contained the PII the tool was supposed to remove, which defeats the purpose for any workflow that logs or stores API responses. The summary now returns only the entity type and character span positions.
+**PII values in API response**. The entity summary returned by `/redact` included an `original_value` field containing the exact text that was detected and masked. This meant the API response itself contained the PII the tool was supposed to remove, which defeats the purpose for any workflow that logs or stores API responses. The summary now returns only the entity type and character span positions.
 
-**No MIME type validation** — The upload endpoint accepted any `Content-Type`. A file with a valid extension but a mismatched or malicious payload would be passed to the extraction pipeline. The endpoint now validates both the file extension and the `Content-Type` header against an explicit allowlist before any processing begins.
+**No MIME type validation**. The upload endpoint accepted any `Content-Type`. A file with a valid extension but a mismatched or malicious payload would be passed to the extraction pipeline. The endpoint now validates both the file extension and the `Content-Type` header against an explicit allowlist before any processing begins.
 
 ### Important fixes
 
-**No file size limit** — There was no upper bound on upload size, making it trivial to exhaust server memory with a large file. Uploads are now capped at 10 MB. The backend enforces this by reading up to 10 MB plus one byte and rejecting anything that exceeds the limit before writing to disk.
+**No file size limit**. There was no upper bound on upload size, making it trivial to exhaust server memory with a large file. Uploads are now capped at 10 MB. The backend enforces this by reading up to 10 MB plus one byte and rejecting anything that exceeds the limit before writing to disk.
 
-**Uploaded file not cleaned up** — Input files written to `inputs/` were not deleted after the text extraction step. The file is now removed immediately after extraction inside a `finally` block, so cleanup happens even when processing fails partway through.
+**Uploaded file not cleaned up**. Input files written to `inputs/` were not deleted after the text extraction step. The file is now removed immediately after extraction inside a `finally` block, so cleanup happens even when processing fails partway through.
 
-**Blocking inference on the async thread** — `detect_pii()` calls the transformer pipeline synchronously. Running it directly inside an `async` route handler stalls the event loop for the full duration of model inference, preventing the server from handling any other request in the meantime. The call is now offloaded to a thread pool worker with `asyncio.to_thread()`.
+**Blocking inference on the async thread**. `detect_pii()` calls the transformer pipeline synchronously. Running it directly inside an `async` route handler stalls the event loop for the full duration of model inference, preventing the server from handling any other request in the meantime. The call is now offloaded to a thread pool worker with `asyncio.to_thread()`.
 
-**`print()` in the model loader** — The model loading fallback used `print()` to surface failures. This bypasses any structured logging or log aggregation. The statement is now a `logging.warning()` call through a named module logger.
+**`print()` in the model loader**. The model loading fallback used `print()` to surface failures. This bypasses any structured logging or log aggregation. The statement is now a `logging.warning()` call through a named module logger.
 
 ### Nits
 
-**Client-side size check** — `UploadZone.jsx` now validates file size immediately on file selection and shows a clear error before the upload request is sent, rather than waiting for the backend to return a 413.
+**Client-side size check**. `UploadZone.jsx` now validates file size immediately on file selection and shows a clear error before the upload request is sent, rather than waiting for the backend to return a 413.
 
-**Pinned dependency ranges** — `requirements.txt` now specifies compatible upper-bound version ranges for all dependencies rather than leaving them unpinned, which prevents silent breakage when a major version of a dependency ships.
+**Pinned dependency ranges**. `requirements.txt` now specifies compatible upper-bound version ranges for all dependencies rather than leaving them unpinned, which prevents silent breakage when a major version of a dependency ships.
 
-**`dangerouslySetInnerHTML` comment** — `RedactedViewer.jsx` now includes an inline comment explaining that the usage is safe because `highlightRedactions()` HTML-escapes all document text before substituting backend-generated tokens with `<mark>` elements.
+**`dangerouslySetInnerHTML` comment**. `RedactedViewer.jsx` now includes an inline comment explaining that the usage is safe because `highlightRedactions()` HTML-escapes all document text before substituting backend-generated tokens with `<mark>` elements.
 
-**Validation error message** — The `else` branch in `preprocessor.py`'s `extract_text()` now raises a consistently formatted error string rather than a dead code path with a mismatched message.
+**Validation error message**. The `else` branch in `preprocessor.py`'s `extract_text()` now raises a consistently formatted error string rather than a dead code path with a mismatched message.
 
 ### Known gaps
 
 These are real and none of them are fixed. I would rather write them down than leave someone to find them.
 
-**Redacted outputs are never deleted** — Uploads are removed from `inputs/` immediately after text extraction, but the redacted file written to `outputs/` stays on disk indefinitely. There is no retention policy and no cleanup job, so a long-running instance accumulates every document it has ever processed. Redacted output is lower risk than the original, but it is not zero risk, since spans the model missed remain in plain text.
+**Redacted outputs are never deleted**. Uploads are removed from `inputs/` immediately after text extraction, but the redacted file written to `outputs/` stays on disk indefinitely. There is no retention policy and no cleanup job, so a long-running instance accumulates every document it has ever processed. Redacted output is lower risk than the original, but it is not zero risk, since spans the model missed remain in plain text.
 
-**`/download/{filename}` has no authentication and predictable names** — The route serves any file in `outputs/` to anyone who can reach it, and output names are derived from the uploaded filename as `redacted_{stem}.txt`. Two people uploading `report.pdf` overwrite each other's output, and either can retrieve the other's by guessing a common filename. Path traversal is handled, but authorisation is not, because there is no concept of a user. Fixing this properly means per-request identifiers rather than name-derived paths, plus ownership checks.
+**`/download/{filename}` has no authentication and predictable names**. The route serves any file in `outputs/` to anyone who can reach it, and output names are derived from the uploaded filename as `redacted_{stem}.txt`. Two people uploading `report.pdf` overwrite each other's output, and either can retrieve the other's by guessing a common filename. Path traversal is handled, but authorisation is not, because there is no concept of a user. Fixing this properly means per-request identifiers rather than name-derived paths, plus ownership checks.
 
-**No authentication or rate limiting anywhere** — Every endpoint is open. Model inference is expensive, so an unauthenticated caller can tie up the server with repeated requests. The GraphQL text argument is length capped and uploads are size capped, which bounds a single request but not the number of them.
+**No authentication or rate limiting anywhere**. Every endpoint is open. Model inference is expensive, so an unauthenticated caller can tie up the server with repeated requests. The GraphQL text argument is length capped and uploads are size capped, which bounds a single request but not the number of them.
 
-**Test coverage is narrow** — There are tests now, covering the redaction logic and the security properties listed above, but nothing covers file parsing, the React components, or how the model behaves on documents it has not seen. There is also no CI, so the suite only runs when someone remembers to run it.
+**Test coverage is narrow**. There are tests now, covering the redaction logic and the security properties listed above, but nothing covers file parsing, the React components, or how the model behaves on documents it has not seen. There is also no CI, so the suite only runs when someone remembers to run it.
 
-**Documents have to be small, and that is the real limitation** — Inference cost climbs much faster than input length. Measured on this model on CPU, 4,000 characters redacts in about twelve seconds, 10,000 characters did not finish in ten minutes, and 168,000 characters asked the allocator for 12.8 GB and raised a `RuntimeError`. The 10 MB upload limit does nothing to bound any of that, so a 200 KB text file was enough to take the process down. Both entry points now cap extracted text at `MAX_TEXT_CHARS` and return 413 rather than dying, but a cap is containment, not a fix. Handling a document of realistic length means chunking the text and running inference over windows, which is the next real piece of engineering here.
+**Documents have to be small, and that is the real limitation**. Inference cost climbs much faster than input length. Measured on this model on CPU, 4,000 characters redacts in about twelve seconds, 10,000 characters did not finish in ten minutes, and 168,000 characters asked the allocator for 12.8 GB and raised a `RuntimeError`. The 10 MB upload limit does nothing to bound any of that, so a 200 KB text file was enough to take the process down. Both entry points now cap extracted text at `MAX_TEXT_CHARS` and return 413 rather than dying, but a cap is containment, not a fix. Handling a document of realistic length means chunking the text and running inference over windows, which is the next real piece of engineering here.
 
 ---
 
