@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from graphql_api import graphql_router
 from preprocessor import extract_text
-from redactor import MODEL_LOADED, detect_pii, merge_adjacent, redact_text
+from redactor import MAX_TEXT_CHARS, MODEL_LOADED, detect_pii, merge_adjacent, redact_text
 
 INPUTS_DIR = Path(__file__).parent / "inputs"
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
@@ -74,6 +74,17 @@ async def redact(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail=str(exc))
     finally:
         input_path.unlink(missing_ok=True)
+
+    # A 10 MB file is nowhere near a safe amount of text for this model, so the
+    # extracted length is checked before anything reaches inference.
+    if len(text) > MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Extracted text is {len(text)} characters. The maximum is "
+                f"{MAX_TEXT_CHARS}. Split the document and try again."
+            ),
+        )
 
     entities = await asyncio.to_thread(detect_pii, text)
     redacted, summary = redact_text(text, entities)

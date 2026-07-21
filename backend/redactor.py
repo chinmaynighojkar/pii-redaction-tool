@@ -4,6 +4,13 @@ from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 
+# Attention memory and time grow far faster than input length on CPU. Measured on
+# this model: 4,000 characters redacts in about 12 seconds, 10,000 did not finish
+# in ten minutes, and 168,000 asked the allocator for 12.8 GB and raised. The
+# 10 MB upload limit does not bound any of that, so every entry point caps text
+# here instead. Raising this needs chunked inference, not a bigger number.
+MAX_TEXT_CHARS = 4_000
+
 try:
     _nlp = pipeline(
         "token-classification",

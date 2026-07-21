@@ -75,13 +75,13 @@ export default function App() {
                 <ol style={{ paddingLeft: "1.25rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
                   <li>Upload a <strong>PDF</strong>, <strong>CSV</strong>, or <strong>TXT</strong> document containing personal data.</li>
                   <li>The backend extracts text and runs it through <strong>openai/privacy-filter</strong>, a token-classification model trained to detect PII.</li>
-                  <li>Detected spans — names, emails, phone numbers, addresses, and more — are replaced with labelled placeholders such as <mark style={{ background: "#fde68a", borderRadius: 3, padding: "0 4px", color: "#92400e", fontWeight: 600 }}>[NAME REDACTED]</mark>.</li>
+                  <li>Detected spans — names, emails, phone numbers, addresses, and more — are replaced with labelled placeholders such as <mark style={{ background: "#fde68a", borderRadius: 3, padding: "0 4px", color: "#92400e", fontWeight: 600 }}>[private_person REDACTED]</mark>.</li>
                   <li>A redacted copy is saved and available for download.</li>
                 </ol>
                 <div style={{ marginTop: "1.25rem", padding: "0.875rem", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6 }}>
                   <strong style={{ color: "#065f46" }}>Supported entity types</strong>
                   <div style={{ marginTop: "0.4rem", color: "#047857", fontSize: "0.8rem" }}>
-                    NAME · EMAIL · PHONE · ADDRESS · ID · DATE · ORGANIZATION · and more
+                    private_person · private_email · private_phone · private_address · private_date · and more
                   </div>
                 </div>
               </div>

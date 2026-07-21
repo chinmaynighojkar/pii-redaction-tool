@@ -9,11 +9,6 @@ from strawberry.fastapi import GraphQLRouter
 
 import redactor
 
-# The upload route bounds its input at 10 MB of file. A raw text argument has no
-# such ceiling, so bound it here too: 50k characters is far past any realistic
-# paste and well short of tying up the model on a single request.
-MAX_TEXT_CHARS = 50_000
-
 DEBUG = os.getenv("PII_DEBUG", "").lower() in {"1", "true", "yes"}
 
 
@@ -53,8 +48,10 @@ class Mutation:
         if not redactor.MODEL_LOADED:
             raise GraphQLError("PII model failed to load on startup.")
 
-        if len(text) > MAX_TEXT_CHARS:
-            raise GraphQLError(f"Text too long. Maximum is {MAX_TEXT_CHARS} characters.")
+        if len(text) > redactor.MAX_TEXT_CHARS:
+            raise GraphQLError(
+                f"Text too long. Maximum is {redactor.MAX_TEXT_CHARS} characters."
+            )
 
         detected = await asyncio.to_thread(redactor.detect_pii, text)
         redacted, _summary = redactor.redact_text(text, detected)

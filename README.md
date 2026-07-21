@@ -66,30 +66,30 @@ is the model's judgement rather than four separate detections.
 
 ### The Model
 
-`openai/privacy-filter` uses the HuggingFace `transformers` pipeline with `aggregation_strategy="simple"`, which groups consecutive tokens sharing a predicted label into a span with a start index, end index, and label.
+`openai/privacy-filter` runs through the HuggingFace `transformers` pipeline with `aggregation_strategy="simple"`. That groups consecutive tokens carrying the same predicted label into a span with a start index, an end index, and a label.
 
-It is worth being precise about what that does and does not give you, because I originally assumed more than it delivers. Aggregation does not guarantee one span per real-world entity. This is a token classification model, so a name outside its vocabulary is split across sub-word pieces, and those pieces come back as separate touching spans. Redacting a real sentence produced this:
+I read that as a guarantee of one span per entity. It is not, and I did not find out until I properly looked at a redacted sentence:
 
 ```
 Contact[private_person REDACTED][private_person REDACTED] at[private_email REDACTED]...
 ```
 
-"Fhaolain" had been split into "Fhaol" and "ain" across two adjacent spans, and each span also included the whitespace in front of it, which is why the space before the placeholder disappeared. The fix is in the redaction engine below.
+The model works on tokens, so a name it has not seen before gets broken into pieces. "Fhaolain" came back as "Fhaol" and "ain" in two spans that touch each other, and each of those spans had quietly taken the space in front of it as well, which is why the text runs straight into the placeholder. The redaction engine below cleans up both problems.
 
 ### The Redaction Engine
 
-The engine does two things before it touches the text.
+Two things happen before any text gets replaced.
 
-**Merging fragments.** `merge_adjacent()` walks the spans in order and joins any two that share a label and touch exactly, so the sub-word pieces of one name become one span again. It then trims the whitespace those spans had swallowed at their edges, which restores the space before each placeholder. Without this step you get one placeholder per fragment rather than per entity.
+First, `merge_adjacent()` walks the spans in order and joins any two that share a label and touch exactly, which puts the pieces of a split name back together. It then trims whitespace off the edges of whatever it produced, so the space in front of each placeholder survives. Skip this step and you get a placeholder per fragment instead of per entity.
 
 ```python
 if merged and merged[-1]["label"] == label and merged[-1]["end"] == start:
     merged[-1]["end"] = end
 ```
 
-**Replacing from the right.** The merged spans are then applied in reverse order of start index. Replacing from left to right shifts the character offsets of everything after each substitution, so later replacements land in the wrong position. Working backwards means every replacement operates on indices that have not yet moved, regardless of how many entities a document contains.
+Second, the merged spans get replaced in reverse order of start index. Going left to right would shift the character offsets of everything after each substitution and send later replacements to the wrong place. Working backwards means every replacement lands on indices that have not moved yet, however many entities a document turns out to have.
 
-Each span is replaced with `[LABEL REDACTED]` where the label is the model's entity class. A summary object returned alongside the redacted text lists the type and character span of everything that was masked, so a reviewer can audit what was caught rather than receiving a silently altered document. The summary deliberately does not include the original values, for the reason given under Security Hardening.
+Each span becomes `[LABEL REDACTED]`, where the label is whatever class the model assigned. Alongside the redacted text there is a summary listing the type and position of everything that was masked, so a reviewer can check what was caught instead of trusting a silently altered document. The summary leaves the original values out on purpose, for the reason in the security section.
 
 ### The Stack
 
@@ -194,35 +194,31 @@ its own schema map.
 `Entity.redactedText` is the placeholder that replaced the span, never the value
 that was removed, for the reason described under Security Hardening below.
 
-### Why GraphQL Here, Honestly
+### Why GraphQL, Honestly
 
-GraphQL earns its keep when many clients need different shapes of related data:
-it lets a client fetch a whole tree in one round trip instead of chaining calls,
-ask for only the fields it will render, and evolve behind one endpoint instead of
-`/v1` and `/v2`. The schema is typed and introspectable, so tooling can generate
-client types and GraphiQL can autocomplete against a live server.
+GraphQL is worth the trouble when a lot of different clients need different
+slices of related data. One request can pull a whole tree instead of chaining
+calls, a client can ask only for the fields it will actually render, and the API
+can grow without anyone standing up a `/v2`. Because the schema is typed and
+introspectable, tooling can generate client types from it and GraphiQL can
+autocomplete against a server that is actually running.
 
-For this API most of that does not apply. There is one resource and one
-operation. There is no tree to fetch in a single round trip and no N+1 problem to
-solve, and REST is the better fit for the file upload path that most users
-actually use. The overhead is real too: every response is HTTP 200 with errors in
-the body, and HTTP caching no longer does anything for you.
+Not much of that applies here. There is one resource and one operation, nothing
+to fetch as a tree, and no N+1 problem to solve. For the file upload path that
+most people use, REST is simply the better fit. It costs something, too: every
+response comes back as HTTP 200 with any errors buried in the body, and HTTP
+caching stops helping you.
 
-What the layer does buy, on its own terms:
+What I did get out of it is narrower. The contract is checked before a resolver
+runs, so a client asking for a field that does not exist fails straight away
+rather than quietly reading `null` in production months later. A caller that only
+wants `redactedText` is not handed the entity list, which counts for a bit more
+than usual when the payload concerns sensitive documents. And GraphiQL builds its
+own documentation from the live schema, so that part cannot drift.
 
-- A contract the server enforces. `redactText(text: String!): RedactionResult!`
-  is validated before any resolver runs, so a client asking for a field that does
-  not exist fails immediately instead of quietly reading `null` in production.
-- Field selection. A caller that only needs `redactedText` does not receive the
-  entity list. For a tool that handles sensitive documents, not sending data
-  nobody asked for is worth something.
-- Documentation that cannot drift, because GraphiQL generates it from the running
-  schema rather than from a file someone has to remember to update.
-
-So: REST stays the primary interface, and GraphQL is a second door onto the same
-redaction core. Both call `detect_pii` and `redact_text`, which is the part worth
-insisting on. Two protocols over one implementation is fine. Two implementations
-would not be.
+REST is still the main way in. GraphQL is a second door onto the same redaction
+code, and both call `detect_pii` and `redact_text`. That last part is the bit I
+would not compromise on.
 
 ---
 
@@ -240,6 +236,8 @@ Ireland's position as a GDPR enforcement hub makes this kind of tooling relevant
 
 This tool is a first pass detection layer, not a legally certified redaction system.
 
+It also only handles short documents. Text is capped at 4,000 characters per request, which is roughly a page and a half. That is a limit of running a 1B parameter model on CPU without chunking rather than anything fundamental, but it is the honest state of it today, and the Known Gaps section below explains what happens if you lift the cap.
+
 The model performs well on common entity types including names, emails, phone numbers, and addresses. Recall is lower on domain-specific identifiers such as Irish PPS numbers, internal client reference codes, or proprietary account formats used by specific institutions.
 
 False negatives (missed PII) are more dangerous than false positives (over-redaction) in a compliance context. In a production deployment, a human review step should follow the automated pass for high-stakes documents.
@@ -254,7 +252,7 @@ The most useful thing this project clarified for me was how the precision versus
 
 Implementing the reverse sort replacement logic was a small detail that required thinking carefully before writing any code. It is the kind of thing that works perfectly in testing on short strings and silently breaks on longer documents with many entities if you get the ordering wrong.
 
-The bug I actually shipped was the one I never reasoned about. The reverse sort I thought hard about was right from the start. The fragmented spans I assumed the model was handling for me were not, and that only surfaced months later when I read a full redacted sentence instead of checking that a response came back at all. Careful reasoning protects you from the failure you are already looking at. Reading the real output is what catches the rest.
+The bug I actually shipped was the one I never thought about. The reverse sort was right from the start because I sat down and worked through it before writing anything. The fragmented spans were wrong the entire time because I assumed the library was handling that for me and never looked at a full sentence of output, only at whether a response came back. Months later I looked, and there it was.
 
 ---
 
@@ -294,7 +292,7 @@ After the initial build, a systematic review identified vulnerabilities and reli
 
 ### Known gaps
 
-These are real and not yet fixed. They are listed because a redaction tool that is quiet about its weaknesses is worse than one that is not.
+These are real and none of them are fixed. I would rather write them down than leave someone to find them.
 
 **Redacted outputs are never deleted** — Uploads are removed from `inputs/` immediately after text extraction, but the redacted file written to `outputs/` stays on disk indefinitely. There is no retention policy and no cleanup job, so a long-running instance accumulates every document it has ever processed. Redacted output is lower risk than the original, but it is not zero risk, since spans the model missed remain in plain text.
 
@@ -305,6 +303,8 @@ These are real and not yet fixed. They are listed because a redaction tool that 
 **The model revision is not pinned** — `pipeline()` is called with a model name and no `revision` argument, so it resolves to whatever the HuggingFace repository currently points at. For a tool whose output is a security control, the detector changing underneath a deployment is a genuine supply chain concern. It should be pinned to a commit hash.
 
 **No automated tests** — Every fix above was verified by hand. Nothing currently prevents a future change from silently reintroducing one of them, and that is the most useful next piece of work on this project.
+
+**Documents have to be small, and that is the real limitation** — Inference cost climbs much faster than input length. Measured on this model on CPU, 4,000 characters redacts in about twelve seconds, 10,000 characters did not finish in ten minutes, and 168,000 characters asked the allocator for 12.8 GB and raised a `RuntimeError`. The 10 MB upload limit does nothing to bound any of that, so a 200 KB text file was enough to take the process down. Both entry points now cap extracted text at `MAX_TEXT_CHARS` and return 413 rather than dying, but a cap is containment, not a fix. Handling a document of realistic length means chunking the text and running inference over windows, which is the next real piece of engineering here.
 
 ---
 

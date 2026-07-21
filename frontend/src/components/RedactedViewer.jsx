@@ -7,8 +7,10 @@ function highlightRedactions(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
+  // Labels are the model's own entity classes and are lowercase, like
+  // private_person. Matching only [A-Z] meant nothing was ever highlighted.
   return escaped.replace(
-    /\[([A-Z0-9_]+ REDACTED)\]/g,
+    /\[([A-Za-z0-9_]+ REDACTED)\]/g,
     '<mark>[$1]</mark>'
   );
 }
